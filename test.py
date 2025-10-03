@@ -1,16 +1,18 @@
 # cluster_app_report.py
 # Run with: wsadmin.sh -lang jython -f cluster_app_report.py
 
-clusters = AdminConfig.list("ServerCluster").splitlines()
+import socket
+hostname = socket.gethostname()
 
-print "Total Clusters: %s" % len(clusters)
+clusters = AdminConfig.list("ServerCluster").splitlines()
 
 for cluster in clusters:
     cname = AdminConfig.showAttribute(cluster, "name")
     members = AdminConfig.list("ClusterMember", cluster).splitlines()
-    apps = AdminApp.list().splitlines()
+    jvm_count = len(members)
 
-    # Find apps targeted to this cluster
+    # Count apps targeted to this cluster
+    apps = AdminApp.list().splitlines()
     deployed_apps = []
     for app in apps:
         targets = AdminApp.view(app, "-MapModulesToServers").splitlines()
@@ -18,7 +20,7 @@ for cluster in clusters:
             if cname in t:
                 deployed_apps.append(app)
                 break
+    app_count = len(deployed_apps)
 
-    print "\nCluster: %s" % cname
-    print "  JVM count: %s" % len(members)
-    print "  Apps deployed: %s" % len(deployed_apps)
+    # Single line per cluster
+    print "%s, %s, %d, %d" % (hostname, cname, jvm_count, app_count)
