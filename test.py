@@ -11,6 +11,13 @@ for cluster in clusters:
     members = AdminConfig.list("ClusterMember", cluster).splitlines()
     jvm_count = len(members)
 
+    # Collect distinct nodes
+    nodes = set()
+    for member in members:
+        node = AdminConfig.showAttribute(member, "nodeName")
+        nodes.add(node)
+    node_count = len(nodes)
+
     # Count apps targeted to this cluster
     apps = AdminApp.list().splitlines()
     deployed_apps = []
@@ -23,4 +30,4 @@ for cluster in clusters:
     app_count = len(deployed_apps)
 
     # Single line per cluster
-    print "%s, %s, %d, %d" % (hostname, cname, jvm_count, app_count)
+    print "%s, %s, %d, %d, %d" % (hostname, cname, jvm_count, app_count, node_count)
