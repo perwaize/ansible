@@ -23,16 +23,29 @@
       become: true
       become_user: "{{ wsadmin_stat.stat.pw_name }}"
 
-    - name: Ensure reports directory exists locally
-      file:
-        path: ./reports
-        state: directory
-      delegate_to: localhost
+    - name: Collect cluster report facts
+      set_fact:
+        all_reports: "{{ (all_reports | default([])) + cluster_report.stdout_lines }}"
 
-    - name: Save report to local per-host file
-      copy:
-        content: |
-          hostname, cluster_name, node_count, jvm_count, app_count
-          {{ cluster_report.stdout }}
-        dest: "./reports/{{ inventory_hostname }}_cluster_report.csv"
-      delegate_to: localhost
+  # Run once on localhost to consolidate results
+  - name: Write consolidated CSV
+    hosts: localhost
+    gather_facts: no
+    tasks:
+      - name: Ensure reports directory exists
+        file:
+          path: ./reports
+          state: directory
+
+      - name: Write single combined CSV file
+        copy:
+          dest: ./reports/websphere_cluster_report.csv
+          content: |
+            hostname,cluster_name,node_count,jvm_count,app_count
+            {% for line in hostvars | dict2items %}
+            {% if line.value.all_reports is defined %}
+            {% for row in line.value.all_reports %}
+            {{ row }}
+            {% endfor %}
+            {% endif %}
+            {% endfor %}
