@@ -1,0 +1,31 @@
+---
+- name: Collect WebSphere cluster/app info
+  hosts: websphere_cells
+  gather_facts: no
+
+  tasks:
+    - name: Copy Jython script to Dmgr01
+      copy:
+        src: cluster_app_report.py
+        dest: /tmp/cluster_app_report.py
+        mode: '0644'
+
+    - name: Run wsadmin to gather cluster info
+      shell: >
+        /usr/WebSphere*/AppServer/profiles/Dmgr01/bin/wsadmin.sh
+        -lang jython -f /tmp/cluster_app_report.py
+      register: cluster_report
+
+    - name: Ensure reports directory exists locally
+      file:
+        path: ./reports
+        state: directory
+      delegate_to: localhost
+
+    - name: Save report to local per-host file
+      copy:
+        content: |
+          hostname, cluster_name, node_count, jvm_count, app_count
+          {{ cluster_report.stdout }}
+        dest: "./reports/{{ inventory_hostname }}_cluster_report.csv"
+      delegate_to: localhost
