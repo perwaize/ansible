@@ -1,13 +1,47 @@
 ---
-- name: Collect WebSphere cluster/app info
+- name: Collect WebSphere cluster/app info from all Dmgr nodes
   hosts: websphere_cells
   gather_facts: no
+  vars:
+    wsadmin_script_path: /tmp/cluster_app_report.py
 
   tasks:
     - name: Copy Jython script to Dmgr01
       copy:
-        src: cluster_app_report.py
-        dest: /tmp/cluster_app_report.py
+        content: |
+          # cluster_app_report.py
+          # Run with: wsadmin.sh -lang jython -f cluster_app_report.py
+          import socket
+          hostname = socket.gethostname()
+
+          clusters = AdminConfig.list("ServerCluster").splitlines()
+
+          for cluster in clusters:
+              cname = AdminConfig.showAttribute(cluster, "name")
+              members = AdminConfig.list("ClusterMember", cluster).splitlines()
+              jvm_count = len(members)
+
+              # Distinct nodes
+              nodes = set()
+              for member in members:
+                  node = AdminConfig.showAttribute(member, "nodeName")
+                  nodes.add(node)
+              node_count = len(nodes)
+
+              # Count apps targeted to this cluster
+              apps = AdminApp.list().splitlines()
+              deployed_apps = []
+              for app in apps:
+                  targets = AdminApp.view(app, "-MapModulesToServers").splitlines()
+                  for t in targets:
+                      if cname in t:
+                          deployed_apps.append(app)
+                          break
+              app_count = len(deployed_apps)
+
+              # Output format: hostname, cluster_name, node_count, jvm_count, app_count
+              print "%s, %s, %d, %d, %d" % (hostname, cname, node_count, jvm_count, app_count)
+        dest: "{{ wsadmin_script_path }}"
         mode: '0644'
 
     - name: Find wsadmin.sh owner
@@ -18,7 +52,7 @@
     - name: Run wsadmin as file owner
       shell: >
         {{ wsadmin_stat.stat.path }}
-        -lang jython -f /tmp/cluster_app_report.py
+        -lang jython -f {{ wsadmin_script_path }}
       register: cluster_report
       become: true
       become_user: "{{ wsadmin_stat.stat.pw_name }}"
@@ -27,25 +61,24 @@
       set_fact:
         all_reports: "{{ (all_reports | default([])) + cluster_report.stdout_lines }}"
 
-  # Run once on localhost to consolidate results
-  - name: Write consolidated CSV
-    hosts: localhost
-    gather_facts: no
-    tasks:
-      - name: Ensure reports directory exists
-        file:
-          path: ./reports
-          state: directory
+- name: Write consolidated CSV on Ansible control node
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Ensure reports directory exists
+      file:
+        path: ./reports
+        state: directory
 
-      - name: Write single combined CSV file
-        copy:
-          dest: ./reports/websphere_cluster_report.csv
-          content: |
-            hostname,cluster_name,node_count,jvm_count,app_count
-            {% for line in hostvars | dict2items %}
-            {% if line.value.all_reports is defined %}
-            {% for row in line.value.all_reports %}
-            {{ row }}
-            {% endfor %}
-            {% endif %}
-            {% endfor %}
+    - name: Write single combined CSV file
+      copy:
+        dest: ./reports/websphere_cluster_report.csv
+        content: |
+          hostname,cluster_name,node_count,jvm_count,app_count
+          {% for host, vars in hostvars.items() %}
+          {% if vars.all_reports is defined %}
+          {% for row in vars.all_reports %}
+          {{ row }}
+          {% endfor %}
+          {% endif %}
+          {% endfor %}
