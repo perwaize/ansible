@@ -6,11 +6,10 @@
     wsadmin_script_path: /tmp/cluster_app_report.py
 
   tasks:
-    - name: Copy Jython script to Dmgr01
+    - name: Copy Jython script to each server
       copy:
         content: |
           # cluster_app_report.py
-          # Run with: wsadmin.sh -lang jython -f cluster_app_report.py
           import socket
           hostname = socket.gethostname()
 
@@ -18,7 +17,7 @@
 
           for cluster in clusters:
               cname = AdminConfig.showAttribute(cluster, "name")
-              members = AdminConfig.list("ClusterMember").splitlines()
+              members = AdminConfig.list("ClusterMember", cluster).splitlines()
               jvm_count = len(members)
 
               # Distinct nodes
@@ -44,26 +43,41 @@
         dest: "{{ wsadmin_script_path }}"
         mode: '0644'
 
-    - name: Find wsadmin.sh owner
-      stat:
-        path: /usr/WebSphere*/AppServer/profiles/Dmgr01/bin/wsadmin.sh
-      register: wsadmin_stat
+    - name: Find wsadmin.sh path dynamically
+      shell: "ls -1 /usr/WebSphere*/AppServer/profiles/Dmgr01/bin/wsadmin.sh 2>/dev/null | head -n 1"
+      register: dmgr_path
+      changed_when: false
+      failed_when: false
 
-    - name: Save wsadmin owner in a host variable
+    - name: Skip host if no Dmgr found
+      debug:
+        msg: "No Dmgr wsadmin.sh found on {{ inventory_hostname }}, skipping."
+      when: dmgr_path.stdout == ""
+
+    - name: Get owner of wsadmin.sh
+      stat:
+        path: "{{ dmgr_path.stdout }}"
+      register: wsadmin_stat
+      when: dmgr_path.stdout != ""
+
+    - name: Save wsadmin owner
       set_fact:
         wsadmin_owner: "{{ wsadmin_stat.stat.pw_name }}"
+      when: dmgr_path.stdout != ""
 
     - name: Run wsadmin as file owner
       shell: >
-        {{ wsadmin_stat.stat.path }}
+        {{ dmgr_path.stdout }}
         -lang jython -f {{ wsadmin_script_path }}
       register: cluster_report
       become: true
       become_user: "{{ wsadmin_owner }}"
+      when: dmgr_path.stdout != ""
 
     - name: Collect cluster report facts
       set_fact:
         all_reports: "{{ (all_reports | default([])) + cluster_report.stdout_lines }}"
+      when: dmgr_path.stdout != ""
 
 - name: Write consolidated CSV on Ansible control node
   hosts: localhost
