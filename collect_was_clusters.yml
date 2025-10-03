@@ -10,11 +10,18 @@
         dest: /tmp/cluster_app_report.py
         mode: '0644'
 
-    - name: Run wsadmin to gather cluster info
+    - name: Find wsadmin.sh owner
+      stat:
+        path: /usr/WebSphere*/AppServer/profiles/Dmgr01/bin/wsadmin.sh
+      register: wsadmin_stat
+
+    - name: Run wsadmin as file owner
       shell: >
-        /usr/WebSphere*/AppServer/profiles/Dmgr01/bin/wsadmin.sh
+        {{ wsadmin_stat.stat.path }}
         -lang jython -f /tmp/cluster_app_report.py
       register: cluster_report
+      become: true
+      become_user: "{{ wsadmin_stat.stat.pw_name }}"
 
     - name: Ensure reports directory exists locally
       file:
